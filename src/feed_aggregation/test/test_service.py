@@ -1,9 +1,16 @@
 import json
+from hyperlink import URL
+
+import attr
 from lxml import html
+from lxml.builder import E
+from lxml.etree import tostring
 from twisted.trial.unittest import SynchronousTestCase
 from twisted.internet import defer
 from treq.testing import StubTreq
-from .. import FeedAggregation
+from klein import Klein
+
+from .. import FeedAggregation, FeedRetrieval
 from .._service import Feed, Channel, Item
 
 FEEDS = (Feed("http://feed-1.invalid/rss.xml",
@@ -66,3 +73,46 @@ class FeedAggregationTests(SynchronousTestCase):
                 ]
             }
         )
+
+
+@attr.s
+class StubFeed:
+    _feeds = attr.ib()
+    _app = Klein()
+
+    def resource(self):
+        return self._app.resource()
+
+    @_app.route('/rss.xml')
+    def returnXML(self, request):
+        host = request.getHeader(b'host')
+        try:
+            return self._feeds[host]
+        except KeyError:
+            request.setResponseCode(404)
+            return b'Unknown host: ' + host
+
+
+def makeXML(feed):
+    channel = feed._channel
+    return tostring(
+        E.rss(E.channel(E.title(channel.title), E.link(channel.link),
+                        *[E.item(E.title(item.title), E.link(item.link))
+                          for item in channel.items], version=u"2.0"))
+    )
+
+
+class FeedRetrievalTests(SynchronousTestCase):
+
+    def setUp(self):
+        service = StubFeed(
+            {URL.from_text(feed._source).host.encode('ascii'): makeXML(feed)
+             for feed in FEEDS}
+        )
+        treq = StubTreq(service.resource())
+        self.retiever = FeedRetrieval(treq=treq)
+
+    def test_retrieve(self):
+        for feed in FEEDS:
+            parsed = self.successResultOf(self.retiever.retrieve(feed._source))
+            self.assertEqual(parsed, feed)

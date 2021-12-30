@@ -1,4 +1,6 @@
 import attr
+import treq
+import feedparser
 from klein import Klein, Plating
 from twisted.web.template import tags as t, slot
 
@@ -56,3 +58,24 @@ class FeedAggregation:
             return feed.asJSON() if jsonRequested else feed.asHTML()
 
         return {'feeds': [convert(feed) for feed in self._feeds]}
+
+
+@attr.s
+class FeedRetrieval:
+    _treq = attr.ib()
+
+    def retrieve(self, url):
+        feedDeferred = self._treq.get(url)
+        feedDeferred.addCallback(treq.content)
+        feedDeferred.addCallback(feedparser.parse)
+
+        def toFeed(parsed):
+            feed = parsed[u'feed']
+            entries = parsed[u'entries']
+            channel = Channel(feed[u'title'], feed[u'link'],
+                              tuple(Item(e[u'title'], e[u'link'])
+                                    for e in entries))
+            return Feed(url, channel)
+
+        feedDeferred.addCallback(toFeed)
+        return feedDeferred
