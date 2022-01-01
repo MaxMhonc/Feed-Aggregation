@@ -1,5 +1,6 @@
 import json
 from hyperlink import URL
+from xml.sax import SAXParseException
 
 import attr
 from lxml import html
@@ -11,7 +12,7 @@ from treq.testing import StubTreq
 from klein import Klein
 
 from .. import FeedAggregation, FeedRetrieval
-from .._service import Feed, Channel, Item
+from .._service import Feed, Channel, Item, ResponseNotOK
 
 FEEDS = (Feed("http://feed-1.invalid/rss.xml",
               Channel(title="First feed", link="http://feed-1/",
@@ -112,7 +113,38 @@ class FeedRetrievalTests(SynchronousTestCase):
         treq = StubTreq(service.resource())
         self.retiever = FeedRetrieval(treq=treq)
 
+    def assertTag(self, tag, name, attributes, text):
+        self.assertEqual(tag.tagName, name)
+        self.assertEqual(tag.attributes, attributes)
+        self.assertEqual(tag.children, [text])
+
     def test_retrieve(self):
         for feed in FEEDS:
             parsed = self.successResultOf(self.retiever.retrieve(feed._source))
             self.assertEqual(parsed, feed)
+
+    def test_responseNotOK(self):
+        noFeed = StubFeed({})
+        retriever = FeedRetrieval(StubTreq(noFeed.resource()))
+        failedFeed = self.successResultOf(
+            retriever.retrieve("http://missing.invalid/rss.xml"))
+        self.assertEqual(
+            failedFeed.asJSON(),
+            {"error": "Failed to load http://missing.invalid/rss.xml: 404"})
+        self.assertTag(failedFeed.asHTML(),
+                       "a", {"href": "http://missing.invalid/rss.xml"},
+                       "Failed to load feed: 404")
+
+    # def test_unexpectedFailure(self):
+    #     empty = StubFeed({b"empty.invalid": b""})
+    #     retriever = FeedRetrieval(StubTreq(empty.resource()))
+    #     failedFeed = self.successResultOf(
+    #         retriever.retrieve("http://empty.invalid/rss.xml"))
+    #     msg = "SAXParseException('no element found',)"
+    #     self.assertEqual(
+    #         failedFeed.asJSON(),
+    #         {"error": "Failed to load http://empty.invalid/rss.xml: " + msg})
+    #     self.assertTag(failedFeed.asHTML(),
+    #                    "a", {"href": "http://empty.invalid/rss.xml"},
+    #                    "Failed to load feed: " + msg)
+    #     self.assertTrue(self.flushLoggedErrors(SAXParseException))
