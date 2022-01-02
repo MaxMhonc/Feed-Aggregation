@@ -26,7 +26,14 @@ FEEDS = (Feed("http://feed-1.invalid/rss.xml",
 class FeedAggregationTests(SynchronousTestCase):
 
     def setUp(self):
-        self.client = StubTreq(FeedAggregation(FEEDS).resource())
+        service = StubFeed(
+            {URL.from_text(feed._source).host.encode('ascii'): makeXML(feed)
+             for feed in FEEDS})
+        treq = StubTreq(service.resource())
+        urls = [feed._source for feed in FEEDS]
+        retriever = FeedRetrieval(treq)
+        self.client = StubTreq(
+            FeedAggregation(retriever.retrieve, urls).resource())
 
     @defer.inlineCallbacks
     def get(self, url):
